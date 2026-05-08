@@ -205,10 +205,10 @@ oncoagent/
 如果您在研究中使用了 OncoAgent，请引用：
 ```
 @software{oncoagent2025,
-  author = {Your Name},
+  author = {Ronnie Zhang},
   title = {OncoAgent: Multi-Agent Collaborative System for Precision Oncology},
-  year = {2025},
-  url = {https://github.com/yourlab/oncoagent}
+  year = {2026},
+  url = {https://github.com/Ronnie2ring/oncoagent_project}
 }
 ```
 
@@ -222,11 +222,9 @@ oncoagent/
 
 ## 📧 联系方式
 
-如有任何问题或合作意向，请联系：`your.email@example.com`
+如有任何问题或合作意向，请联系：`943830787@qq.com`
 
 ---
 
 **OncoAgent —— 让肿瘤决策从“黑箱预测”走向“透明因果推理”。**
 ```
-
-这份 README 已经包含了项目介绍、特性、架构图（文字版）、安装使用、数据格式、扩展指南、测试、项目结构、许可证等标准章节，可直接放入项目根目录。如果需要适配具体版本号或作者信息，请自行替换占位符。
