@@ -1,0 +1,14 @@
+# OncoAgent 配置文件示例
+reasoner:
+  use_mock: true
+  model: "gpt-4"   # 如果使用真实LLM
+
+agents:
+  genomic:
+    enabled: true
+  transcriptomic:
+    enabled: true
+  radiomic:
+    enabled: true
+  knowledge_graph:
+    enabled: true
