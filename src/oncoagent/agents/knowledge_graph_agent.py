@@ -1,20 +1,35 @@
 from ..core.base_agent import BaseAgent
-from ..core.types import AgentRole, SubTask, AgentOutput, Fact
+from ..core.types import AgentOutput, SubTask
 
 
 class KnowledgeGraphAgent(BaseAgent):
-    """知识图谱检索Agent：查询基因-药物-表型关联"""
+    """Retrieve biomarker, drug, and phenotype associations."""
+
     def process(self, task: SubTask) -> AgentOutput:
-        print(f"[KnowledgeGraphAgent] 检索知识库...")
         query_entity = task.input_data.get("entity", "KRAS G12C")
+        normalized_query = query_entity.upper()
         facts = []
-        if "KRAS G12C" in query_entity:
-            facts.append(Fact(content="KRAS G12C突变对索托拉西布(sotorasib)敏感 (证据等级A)",
-                              source_agent=self.role, confidence=0.95))
-        if "STK11" in query_entity:
-            facts.append(Fact(content="STK11突变与抗PD-1治疗原发性耐药强相关 (Skoulidis et al. 2018)",
-                              source_agent=self.role, confidence=0.92))
-        if "TGF-β" in query_entity:
-            facts.append(Fact(content="TGF-β高活性可介导免疫排斥微环境，联合TGF-β抑制剂可能逆转耐药",
-                              source_agent=self.role, confidence=0.89))
+
+        if "KRAS G12C" in normalized_query:
+            facts.append(
+                self._add_fact(
+                    content="KRAS G12C mutation is sensitive to sotorasib (evidence level A).",
+                    confidence=0.95,
+                )
+            )
+        if "STK11" in normalized_query:
+            facts.append(
+                self._add_fact(
+                    content="STK11 mutation is strongly associated with primary resistance to anti-PD-1 therapy.",
+                    confidence=0.92,
+                )
+            )
+        if "TGF" in normalized_query:
+            facts.append(
+                self._add_fact(
+                    content="High TGF-beta activity can mediate immune exclusion; TGF-beta inhibition may reverse resistance.",
+                    confidence=0.89,
+                )
+            )
+
         return AgentOutput(success=True, facts=facts)

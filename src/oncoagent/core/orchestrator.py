@@ -1,21 +1,32 @@
-from ..agents import GenomicAgent, TranscriptomicAgent, RadiomicAgent, KnowledgeGraphAgent
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Tuple
+
+from ..agents import GenomicAgent, KnowledgeGraphAgent, RadiomicAgent, TranscriptomicAgent
 from ..reasoning.chain_of_thought import ChainOfThoughtReasoner
 from ..reasoning.debate import DebateConsensusModule
 from .memory import SharedMemory
-from .types import AgentRole, SubTask
+from .types import AgentOutput, AgentRole, SubTask
 
 
 class Orchestrator:
-    """
-    任务分解、调度、管理多Agent协作流程
-    """
-    def __init__(self, memory: SharedMemory):
+    """Coordinate task decomposition, agent execution, reasoning, and consensus."""
+
+    def __init__(
+        self,
+        memory: SharedMemory,
+        max_workers: int | None = None,
+        verbose: bool = True,
+        retain_memory: bool = False,
+    ):
         self.memory = memory
         self.agents = self._init_agents(memory)
         self.reasoner = ChainOfThoughtReasoner(memory, use_mock=True)
         self.debate = DebateConsensusModule()
+        self.max_workers = max_workers or len(self.agents)
+        self.verbose = verbose
+        self.retain_memory = retain_memory
 
-    def _init_agents(self, memory):
+    def _init_agents(self, memory: SharedMemory):
         return {
             AgentRole.GENOMIC: GenomicAgent(AgentRole.GENOMIC, memory),
             AgentRole.TRANSCRIPTOMIC: TranscriptomicAgent(AgentRole.TRANSCRIPTOMIC, memory),
@@ -23,57 +34,71 @@ class Orchestrator:
             AgentRole.KNOWLEDGE_GRAPH: KnowledgeGraphAgent(AgentRole.KNOWLEDGE_GRAPH, memory),
         }
 
+    def _build_tasks(self, patient_data: dict) -> List[SubTask]:
+        return [
+            SubTask("Analyze genomic biomarkers", AgentRole.GENOMIC, patient_data.get("genomic", {})),
+            SubTask(
+                "Analyze transcriptomic immune context",
+                AgentRole.TRANSCRIPTOMIC,
+                patient_data.get("transcriptomic", {}),
+            ),
+            SubTask("Analyze radiomic features", AgentRole.RADIOMIC, patient_data.get("radiomic", {})),
+            SubTask(
+                "Retrieve knowledge graph evidence",
+                AgentRole.KNOWLEDGE_GRAPH,
+                {"entity": patient_data.get("kg_query", "")},
+            ),
+        ]
+
+    @staticmethod
+    def _run_agent(agents, task: SubTask) -> Tuple[AgentRole, AgentOutput]:
+        return task.target_agent, agents[task.target_agent].process(task)
+
     def run(self, user_query: str, patient_data: dict) -> dict:
-        print("\n" + "="*60)
-        print(f"[Orchestrator] 接到任务: {user_query}")
-        print("="*60)
+        if self.verbose:
+            print("\n" + "=" * 60)
+            print(f"[Orchestrator] Received task: {user_query}")
+            print("=" * 60)
 
-        # 1. 分解任务，执行各Agent
-        all_outputs = []
-        task_gen = SubTask("分析基因组", AgentRole.GENOMIC, patient_data.get("genomic", {}))
-        out_gen = self.agents[AgentRole.GENOMIC].process(task_gen)
-        all_outputs.append(out_gen)
+        tasks = self._build_tasks(patient_data)
+        request_memory = self.memory if self.retain_memory else SharedMemory()
+        agents = self.agents if self.retain_memory else self._init_agents(request_memory)
+        reasoner = self.reasoner if self.retain_memory else ChainOfThoughtReasoner(request_memory, use_mock=True)
+        outputs_by_role: Dict[AgentRole, AgentOutput] = {}
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(tasks))) as executor:
+            futures = {executor.submit(self._run_agent, agents, task): task for task in tasks}
+            for future in as_completed(futures):
+                role, output = future.result()
+                outputs_by_role[role] = output
 
-        task_tran = SubTask("分析转录组", AgentRole.TRANSCRIPTOMIC, patient_data.get("transcriptomic", {}))
-        out_tran = self.agents[AgentRole.TRANSCRIPTOMIC].process(task_tran)
-        all_outputs.append(out_tran)
+        all_outputs = [outputs_by_role[task.target_agent] for task in tasks]
+        all_facts = [fact for output in all_outputs if output.success for fact in output.facts]
 
-        task_rad = SubTask("分析影像", AgentRole.RADIOMIC, patient_data.get("radiomic", {}))
-        out_rad = self.agents[AgentRole.RADIOMIC].process(task_rad)
-        all_outputs.append(out_rad)
+        if self.verbose:
+            print(f"\n[SharedMemory] Collected {len(all_facts)} facts.")
 
-        task_kg = SubTask("知识检索", AgentRole.KNOWLEDGE_GRAPH, {"entity": patient_data.get("kg_query", "")})
-        out_kg = self.agents[AgentRole.KNOWLEDGE_GRAPH].process(task_kg)
-        all_outputs.append(out_kg)
-
-        # 2. 收集所有事实
-        all_facts = []
-        for out in all_outputs:
-            if out.success:
-                all_facts.extend(out.facts)
-        print(f"\n[SharedMemory] 当前共存储 {len(all_facts)} 条事实")
-
-        # 3. 长链推理
-        reasoning_result = self.reasoner.reason(user_query, all_facts)
-
-        # 4. 辩论与共识
+        reasoning_result = reasoner.reason(user_query, all_facts)
         final_result = self.debate.resolve(all_outputs, reasoning_result)
 
-        # 5. 输出最终决策
-        print("\n" + "="*60)
-        print("最终决策报告")
-        print("="*60)
-        print(f"结论: {final_result['conclusion']}")
-        print(f"置信度: {final_result['confidence']:.2f}")
-        print("\n推理链:")
-        for i, step in enumerate(final_result['reasoning_chain'], 1):
-            print(f"  {step}")
-        if final_result.get('contradictions'):
-            print("\n矛盾处理:")
-            for c in final_result['contradictions']:
-                print(f"  ⚠️ {c}")
-        print("\n治疗推荐:")
-        for rec in final_result['recommendations']:
-            print(f"  ✔ {rec}")
+        if self.verbose:
+            self._print_final_result(final_result)
 
         return final_result
+
+    @staticmethod
+    def _print_final_result(final_result: dict) -> None:
+        print("\n" + "=" * 60)
+        print("Final decision report")
+        print("=" * 60)
+        print(f"Conclusion: {final_result['conclusion']}")
+        print(f"Confidence: {final_result['confidence']:.2f}")
+        print("\nReasoning chain:")
+        for step in final_result["reasoning_chain"]:
+            print(f"  {step}")
+        if final_result.get("contradictions"):
+            print("\nContradictions:")
+            for contradiction in final_result["contradictions"]:
+                print(f"  - {contradiction}")
+        print("\nRecommendations:")
+        for recommendation in final_result["recommendations"]:
+            print(f"  - {recommendation}")
